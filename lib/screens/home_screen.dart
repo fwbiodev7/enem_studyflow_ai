@@ -22,7 +22,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = false;
 
   final _subjectsController = TextEditingController();
-  final _hoursController = TextEditingController();
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
 
   @override
   void initState() {
@@ -41,11 +42,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _generateSchedule() async {
     final subjects = _subjectsController.text;
-    final hours = int.tryParse(_hoursController.text);
 
-    if (subjects.isEmpty || hours == null || hours <= 0) {
+    if (subjects.isEmpty || _startTime == null || _endTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preencha corretamente matérias e horas.')),
+        const SnackBar(content: Text('Preencha as matérias e os horários de início e término.')),
+      );
+      return;
+    }
+    
+    final now = DateTime.now();
+    final startDt = DateTime(now.year, now.month, now.day, _startTime!.hour, _startTime!.minute);
+    var endDt = DateTime(now.year, now.month, now.day, _endTime!.hour, _endTime!.minute);
+    if (endDt.isBefore(startDt)) endDt = endDt.add(const Duration(days: 1));
+    
+    if (endDt.difference(startDt).inMinutes < 30) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('O período deve ser de pelo menos 30 minutos.')),
       );
       return;
     }
@@ -53,7 +65,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final blocks = await _aiService.generateSchedule(subjects, hours);
+      final startStr = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}';
+      final endStr = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}';
+      final blocks = await _aiService.generateSchedule(subjects, startStr, endStr);
       await _storageService.saveSchedule(blocks);
       
       // Agendar notificações locais (15 minutos antes)
@@ -65,8 +79,9 @@ class _HomeScreenState extends State<HomeScreen> {
           await _notificationService.scheduleNotification(
             id: i,
             title: 'Prepare-se! 🎯',
-            body: 'Seu estudo de \${block.subject} começa em 15 minutos.',
+            body: 'Seu estudo de ${block.subject} começa em 15 minutos.',
             scheduledDate: notificationTime,
+            context: context,
           );
         }
       }
@@ -106,38 +121,129 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showSetupBottomSheet() {
+    _startTime = null;
+    _endTime = null;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          left: 24, right: 24, top: 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Novo Cronograma com IA ✨', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _subjectsController,
-              decoration: const InputDecoration(labelText: 'Matérias de dificuldade (ex: Física, Redação)', border: OutlineInputBorder()),
+      builder: (ctx) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              left: 24, right: 24, top: 24,
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _hoursController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Horas disponíveis hoje', border: OutlineInputBorder()),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Novo Cronograma com IA ✨', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _subjectsController,
+                  decoration: const InputDecoration(labelText: 'Matérias de dificuldade (ex: Física, Redação)', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 14, minute: 0));
+                          if (time != null) setModalState(() => _startTime = time);
+                        },
+                        icon: const Icon(Icons.access_time),
+                        label: Text(_startTime != null ? _startTime!.format(context) : 'Início'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 18, minute: 0));
+                          if (time != null) setModalState(() => _endTime = time);
+                        },
+                        icon: const Icon(Icons.access_time_filled),
+                        label: Text(_endTime != null ? _endTime!.format(context) : 'Fim'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _generateSchedule,
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                  child: const Text('Gerar Plano de Estudos', style: TextStyle(fontSize: 16)),
+                ),
+                const SizedBox(height: 24),
+              ],
             ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _generateSchedule,
-              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-              child: const Text('Gerar Plano de Estudos', style: TextStyle(fontSize: 16)),
-            ),
-            const SizedBox(height: 24),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showStudyDetailsModal(StudyBlock block) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Detalhes: ${block.subject}',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              const SizedBox(height: 16),
+              Expanded(
+                child: FutureBuilder<String>(
+                  future: _aiService.getStudyDetails(block.subject),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 16),
+                            Text('Buscando resumo e aulas...'),
+                          ],
+                        ),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Erro: ${snapshot.error}'));
+                    }
+                    return SingleChildScrollView(
+                      controller: controller,
+                      child: Text(
+                        snapshot.data ?? '',
+                        style: const TextStyle(fontSize: 16, height: 1.5),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                child: const Text('Fechar', style: TextStyle(fontSize: 16)),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -152,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Olá, \${_userName ?? ''} 📚'),
+        title: Text('Olá, ${_userName ?? ''} 📚'),
         elevation: 0,
         actions: [
           IconButton(
@@ -221,13 +327,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   margin: const EdgeInsets.only(bottom: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   child: ListTile(
+                    onTap: () => _showStudyDetailsModal(block),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     leading: CircleAvatar(
                       backgroundColor: statusColor.withOpacity(0.15),
                       child: Icon(statusIcon, color: statusColor),
                     ),
                     title: Text(block.subject, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('\${timeFormat.format(block.startTime)} - \${timeFormat.format(block.endTime)}'),
+                    subtitle: Text('${timeFormat.format(block.startTime)} - ${timeFormat.format(block.endTime)}'),
                     trailing: DropdownButton<String>(
                       value: block.status,
                       underline: const SizedBox(),

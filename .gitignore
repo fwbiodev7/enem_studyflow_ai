@@ -1,4 +1,7 @@
-# Miscellaneous
+# Arquivo de segredos - NUNCA commitar!
+lib/config/secrets.dart
+
+# Misc
 *.class
 *.log
 *.pyc

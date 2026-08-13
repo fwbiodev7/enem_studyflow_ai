@@ -19,12 +19,14 @@ class StorageService {
   Future<void> saveSchedule(List<StudyBlock> blocks) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonString = jsonEncode(blocks.map((b) => b.toJson()).toList());
-    await prefs.setString(_scheduleKey, jsonString);
+    final userName = prefs.getString(_userNameKey) ?? 'default';
+    await prefs.setString('${_scheduleKey}_$userName', jsonString);
   }
 
   Future<List<StudyBlock>?> getSchedule() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(_scheduleKey);
+    final userName = prefs.getString(_userNameKey) ?? 'default';
+    final jsonString = prefs.getString('${_scheduleKey}_$userName');
     if (jsonString != null) {
       final List<dynamic> jsonList = jsonDecode(jsonString);
       return jsonList.map((json) => StudyBlock.fromJson(json)).toList();
